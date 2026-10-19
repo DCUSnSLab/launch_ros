@@ -23,6 +23,10 @@ from launch.launch_context import LaunchContext
 import rclpy.parameter
 
 import yaml
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
 
 from .evaluate_parameters import evaluate_parameter_dict
 from .normalize_parameters import normalize_parameter_dict
@@ -91,7 +95,7 @@ def to_parameters_list(
     for params_set_or_path in evaluated_parameters:
         if isinstance(params_set_or_path, pathlib.Path):
             with open(str(params_set_or_path), 'r') as f:
-                param_dict = yaml.safe_load(f)
+                param_dict = yaml.load(f, Loader=SafeLoader)
                 normalized_param_dict = __normalize_parameters_dict(param_dict)
 
                 if normalized_param_dict:

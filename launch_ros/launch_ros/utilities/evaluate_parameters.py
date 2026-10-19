@@ -30,6 +30,10 @@ from launch.utilities import ensure_argument_type
 from launch.utilities import perform_substitutions
 
 import yaml
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
 
 from ..parameter_descriptions import Parameter as ParameterDescription
 from ..parameter_descriptions import ParameterFile
@@ -76,7 +80,7 @@ def evaluate_parameter_dict(
                     evaluated_value = "''"
 
                 try:
-                    yaml_evaluated_value = yaml.safe_load(evaluated_value)
+                    yaml_evaluated_value = yaml.load(evaluated_value, Loader=SafeLoader)
                 except yaml.YAMLError:
                     raise TypeError(
                         'Unable to parse the value of parameter {} as yaml. '
@@ -118,7 +122,7 @@ def evaluate_parameter_dict(
                 # All values in a list must have the same type.
                 # If they don't then assume it is a list of strings
                 yaml_evaluated_value = [
-                    yaml.safe_load(item) for item in evaluated_value
+                    yaml.load(item, Loader=SafeLoader) for item in evaluated_value
                 ]
                 if not check_sequence_type_is_allowed(yaml_evaluated_value):
                     raise TypeError(
@@ -131,9 +135,9 @@ def evaluate_parameter_dict(
                 # Value is an array of the same type, so nothing to evaluate.
                 output_value = []
                 target_type = type(value[0])
-                for i, subvalue in enumerate(value):
+                for subvalue in value:
                     output_value.append(target_type(subvalue))
-                    evaluated_value = tuple(output_value)
+                evaluated_value = tuple(output_value)
         elif isinstance(value, ParameterValueDescription):
             evaluated_value = value.evaluate(context)
         else:

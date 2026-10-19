@@ -23,8 +23,10 @@ from launch.substitutions import TextSubstitution
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.utilities import evaluate_parameters
 from launch_ros.utilities import normalize_parameters
+from launch_ros.utilities import to_parameters_list
 
 import pytest
+import yaml
 
 
 def test_not_a_list():
@@ -404,3 +406,34 @@ def test_empty_string_evaluates_to_empty_string():
     norm = normalize_parameters(orig)
     expected = ({'foo': ''},)
     assert evaluate_parameters(LaunchContext(), norm) == expected
+
+
+@pytest.mark.parametrize('loader', [
+    yaml.SafeLoader, getattr(yaml, 'CSafeLoader', yaml.SafeLoader)])
+def test_parameter_file_scopes_and_types(tmp_path, monkeypatch, loader):
+    """Preserve node selection, flattening and scalar/array types."""
+    import importlib
+    module = importlib.import_module('launch_ros.utilities.to_parameters_list')
+    monkeypatch.setattr(module, 'SafeLoader', loader)
+    path = tmp_path / 'parameters.yaml'
+    path.write_text(yaml.safe_dump({
+        '/**': {'ros__parameters': {
+            'nested': {'enabled': True}, 'rate': 1.5,
+            'labels': ['left', 'right'], 'literal': 'true'}},
+        '/sensing/node': {'ros__parameters': {'rate': 2.0}},
+        '/other': {'ros__parameters': {'ignored': 3}},
+    }))
+    result = to_parameters_list(LaunchContext(), 'node', '/sensing', [path])
+    assert {parameter.name: parameter.value for parameter in result} == {
+        'nested.enabled': True, 'rate': 2.0, 'labels': ('left', 'right'), 'literal': 'true'}
+    path.write_text('/**: {ros__parameters: {changed: 42}}')
+    result = to_parameters_list(LaunchContext(), 'node', '/sensing', [path])
+    assert {parameter.name: parameter.value for parameter in result} == {'changed': 42}
+
+
+def test_parameter_file_rejects_python_objects(tmp_path):
+    """Continue to reject unsafe YAML constructors."""
+    path = tmp_path / 'parameters.yaml'
+    path.write_text('!!python/tuple [one, two]')
+    with pytest.raises(yaml.constructor.ConstructorError):
+        to_parameters_list(LaunchContext(), 'node', '/', [path])

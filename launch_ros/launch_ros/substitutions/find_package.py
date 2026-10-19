@@ -14,6 +14,8 @@
 
 """Module for the FindPackage substitution."""
 
+from functools import lru_cache
+import os
 from typing import List
 from typing import Sequence
 from typing import Text
@@ -28,6 +30,11 @@ from launch.substitution import Substitution
 from launch.substitutions import PathSubstitution
 from launch.utilities import normalize_to_list_of_substitutions
 from launch.utilities import perform_substitutions
+
+
+@lru_cache(maxsize=128)
+def _find_package(finder, package_name, ament_prefix_path, cwd):
+    return finder(package_name)
 
 
 class FindPackage(PathSubstitution):
@@ -94,7 +101,8 @@ class FindPackagePrefix(FindPackage):
 
     def find(self, package_name: Text) -> Text:
         """Find the package prefix."""
-        return get_package_prefix(package_name)
+        return _find_package(
+            get_package_prefix, package_name, os.environ.get('AMENT_PREFIX_PATH'), os.getcwd())
 
 
 @expose_substitution('find-pkg-share')
@@ -110,4 +118,6 @@ class FindPackageShare(FindPackage):
 
     def find(self, package_name: Text) -> Text:
         """Find the share directory of a package."""
-        return get_package_share_directory(package_name)
+        return _find_package(
+            get_package_share_directory, package_name,
+            os.environ.get('AMENT_PREFIX_PATH'), os.getcwd())

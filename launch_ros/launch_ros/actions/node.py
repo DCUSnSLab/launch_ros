@@ -557,18 +557,24 @@ def instantiate_extension(
 
 
 g_entry_points_impl = None
+g_node_action_entry_points = None
 
 
 def get_extensions(logger):
     global g_entry_points_impl
+    global g_node_action_entry_points
     group_name = 'launch_ros.node_action'
-    if g_entry_points_impl is None:
-        g_entry_points_impl = importlib_metadata.entry_points()
-    entry_points_impl = g_entry_points_impl
-    if hasattr(entry_points_impl, 'select'):
-        groups = entry_points_impl.select(group=group_name)
-    else:
-        groups = entry_points_impl.get(group_name, [])
+    if g_node_action_entry_points is None:
+        if g_entry_points_impl is None:
+            g_entry_points_impl = importlib_metadata.entry_points()
+        entry_points_impl = g_entry_points_impl
+        # select() scans every installed entry point; doing it once per Node dominated the
+        # evaluation of large launch trees.
+        if hasattr(entry_points_impl, 'select'):
+            g_node_action_entry_points = list(entry_points_impl.select(group=group_name))
+        else:
+            g_node_action_entry_points = list(entry_points_impl.get(group_name, []))
+    groups = g_node_action_entry_points
     entry_points = {}
     for entry_point in groups:
         entry_points[entry_point.name] = entry_point
