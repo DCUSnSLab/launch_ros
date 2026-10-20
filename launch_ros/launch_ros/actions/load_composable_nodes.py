@@ -39,6 +39,7 @@ from launch.utilities import perform_substitutions
 from launch_ros.parameter_descriptions import ParameterFile
 
 import lifecycle_msgs.msg
+from rclpy.parameter import parameter_value_to_python
 
 from .composable_node_container import ComposableNodeContainer
 from .lifecycle_transition import LifecycleTransition
@@ -47,10 +48,12 @@ from ..descriptions import ComposableNode
 from ..ros_adapters import get_ros_node
 from ..utilities import add_node_name
 from ..utilities import evaluate_parameters
+from ..utilities import get_dump_params_collector
 from ..utilities import get_node_name_count
 from ..utilities import make_namespace_absolute
 from ..utilities import prefix_namespace
 from ..utilities import to_parameters_list
+from ..utilities.dump_params import resolve_composable_node_fqn
 from ..utilities.normalize_parameters import normalize_parameter_dict
 
 
@@ -210,6 +213,14 @@ class LoadComposableNodes(Action):
         context: LaunchContext
     ) -> Optional[List[Action]]:
         """Execute the action."""
+        collector = get_dump_params_collector(context)
+        if collector is not None:
+            for node_description in self.__composable_node_descriptions:
+                request = get_composable_node_load_request(node_description, context)
+                if request is not None:
+                    _dump_composable_node_params(request, collector)
+            return None
+
         # resolve target container node name
 
         if is_a_subclass(self.__target_container, ComposableNodeContainer):
@@ -269,6 +280,25 @@ class LoadComposableNodes(Action):
             return load_actions
         if len(autostart_actions) != 0:
             return autostart_actions
+
+
+def _dump_composable_node_params(request, collector):
+    fqn = resolve_composable_node_fqn(
+        request.remap_rules, request.node_name, request.node_namespace)
+    if fqn is None:
+        collector.warn(
+            'skipped composable node with unspecified name (plugin={})'.format(
+                request.plugin_name))
+        return
+    for argument in request.extra_arguments:
+        if argument.name == 'use_global_arguments' and argument.value.bool_value:
+            collector.warn(
+                'container arguments may also set parameters of {}'.format(fqn))
+    # The component manager applies the request parameters in order, the last one wins.
+    collector.add_node(fqn, {
+        parameter.name: parameter_value_to_python(parameter.value)
+        for parameter in request.parameters
+    })
 
 
 def get_composable_node_load_request(

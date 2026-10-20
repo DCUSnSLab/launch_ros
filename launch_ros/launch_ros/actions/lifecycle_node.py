@@ -33,6 +33,7 @@ import lifecycle_msgs.srv
 from .lifecycle_transition import LifecycleTransition
 from .node import Node
 
+from ..utilities import is_dump_params_mode
 from ..utilities import LifecycleEventManager
 
 
@@ -111,6 +112,10 @@ class LifecycleNode(Node):
 
         Delegated to :meth:`launch.actions.ExecuteProcess.execute`.
         """
+        # Dumping parameters needs no lifecycle manager and no transitions.
+        if is_dump_params_mode(context):
+            return super().execute(context)
+
         self._perform_substitutions(context)  # ensure self.node_name is expanded
         if '<node_name_unspecified>' in self.node_name:
             raise RuntimeError('node_name unexpectedly incomplete for lifecycle node')

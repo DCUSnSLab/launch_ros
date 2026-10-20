@@ -50,12 +50,14 @@ from launch_ros.remap_rule_type import SomeRemapRules
 from launch_ros.substitutions import ExecutableInPackage
 from launch_ros.utilities import add_node_name
 from launch_ros.utilities import evaluate_parameters
+from launch_ros.utilities import get_dump_params_collector
 from launch_ros.utilities import get_node_name_count
 from launch_ros.utilities import make_namespace_absolute
 from launch_ros.utilities import normalize_parameters
 from launch_ros.utilities import normalize_remap_rules
 from launch_ros.utilities import plugin_support
 from launch_ros.utilities import prefix_namespace
+from launch_ros.utilities.dump_params import resolve_node_from_ros_args
 
 
 from rclpy.validate_namespace import validate_namespace
@@ -493,6 +495,11 @@ class Node(ExecuteProcess):
         if self.__expanded_node_namespace != '':
             ros_specific_arguments['ns'] = '__ns:={}'.format(self.__expanded_node_namespace)
 
+        collector = get_dump_params_collector(context)
+        if collector is not None:
+            self.__dump_params(context, collector, ros_specific_arguments)
+            return None
+
         # Give extensions a chance to prepare for execution
         for extension in self.__extensions.values():
             cmd_extension, ros_specific_arguments = extension.prepare_for_execute(
@@ -516,6 +523,18 @@ class Node(ExecuteProcess):
                 )
 
         return ret
+
+    def __dump_params(self, context, collector, ros_specific_arguments):
+        # The executable is not resolved, so dumping does not need the package installed.
+        context.extend_locals({'ros_specific_arguments': ros_specific_arguments})
+        argv = [perform_substitutions(context, x) for x in self.cmd[1:]]
+        fqn, params = resolve_node_from_ros_args(argv)
+        if fqn is None:
+            collector.warn(
+                'skipped node with unspecified name (package={}, executable={})'.format(
+                    self.__package, self.__node_executable))
+            return
+        collector.add_node(fqn, params)
 
     @property
     def expanded_node_namespace(self):
