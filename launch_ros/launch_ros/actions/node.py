@@ -65,6 +65,7 @@ from rclpy.validate_node_name import validate_node_name
 
 import yaml
 
+from ..descriptions import CombinedParameterFiles
 from ..descriptions import Parameter
 from ..descriptions import ParameterFile
 
@@ -301,7 +302,23 @@ class Node(ExecuteProcess):
                 normalized_params.append(
                     get_nested_dictionary_from_nested_key_value_pairs([param]))
                 continue
-            raise ValueError('param Entity should have name or from attribute')
+
+            children = param.get_attr('file', data_type=List[Entity], optional=True)
+            if children:
+                file_paths = []
+                for child in children:
+                    file_paths.append(parser.parse_substitution(child.get_attr('path')))
+                    child.assert_entity_completely_parsed()
+
+                if isinstance(allow_substs, str):
+                    allow_substs = parser.parse_substitution(allow_substs)
+                else:
+                    allow_substs = bool(allow_substs)
+                param.assert_entity_completely_parsed()
+                normalized_params.append(
+                    CombinedParameterFiles(file_paths, allow_substs=allow_substs))
+                continue
+            raise ValueError('param Entity should have name, from attribute, or file children')
         return normalized_params
 
     @classmethod

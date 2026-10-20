@@ -260,8 +260,25 @@ def _parse_param_rule(rule: str) -> Tuple[str, str, Any]:
 
 def _params_from_yaml(text: str, source: str) -> List[Tuple[str, str, Any]]:
     """Return (node key, parameter name, value) entries of a params file in document order."""
-    root = yaml.compose(text, Loader=_RclYamlLoader)
-    entries: List[Tuple[str, str, Any]] = []
+    return [
+        (key, name, _rcl_value(value))
+        for key, name, value in parameter_file_entries(text, source, _RclYamlLoader)
+    ]
+
+
+def parameter_file_entries(
+    text: str,
+    source: str,
+    loader=yaml.SafeLoader,
+) -> List[Tuple[str, str, yaml.Node]]:
+    """
+    Return the entries of a params file in document order, as rcl reads them.
+
+    Each entry is the node name key (nested namespaces joined with '/'), the parameter
+    name (nested names joined with '.') and the composed YAML value node.
+    """
+    root = yaml.compose(text, Loader=loader)
+    entries: List[Tuple[str, str, yaml.Node]] = []
     if root is None:
         return entries
 
@@ -271,20 +288,20 @@ def _params_from_yaml(text: str, source: str) -> List[Tuple[str, str, Any]]:
             if isinstance(value_node, yaml.MappingNode):
                 add_params(key, name + '.', value_node)
             else:
-                entries.append((key, name, _rcl_value(value_node)))
+                entries.append((key, name, value_node))
 
-    def visit(parts: List[str], mapping: yaml.Node) -> None:
-        if not isinstance(mapping, yaml.MappingNode):
-            raise DumpParamsError(
-                "invalid parameter file '{}' at {}".format(source, mapping.start_mark))
-        for key_node, value_node in mapping.value:
-            if key_node.value == 'ros__parameters':
-                if not isinstance(value_node, yaml.MappingNode):
-                    raise DumpParamsError(
-                        "invalid parameter file '{}' at {}".format(source, value_node.start_mark))
+    def visit(parts: List[str], node: yaml.Node) -> None:
+        if not isinstance(node, yaml.MappingNode):
+            raise RuntimeError(
+                "invalid parameter file '{}' at {}".format(source, node.start_mark))
+        for key_node, value_node in node.value:
+            if key_node.value != 'ros__parameters':
+                visit(parts + [key_node.value], value_node)
+            elif isinstance(value_node, yaml.MappingNode):
                 add_params('/'.join(parts), '', value_node)
             else:
-                visit(parts + [key_node.value], value_node)
+                raise RuntimeError(
+                    "invalid parameter file '{}' at {}".format(source, value_node.start_mark))
 
     visit([], root)
     return entries

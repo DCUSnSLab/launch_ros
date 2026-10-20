@@ -17,8 +17,10 @@
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Text
 from typing import Tuple
 from typing import TYPE_CHECKING
@@ -260,6 +262,127 @@ class ParameterFile:
             except FileNotFoundError:
                 pass
             self.__evaluated_param_file = None
+
+    def __del__(self):
+        self.cleanup()
+
+
+class CombinedParameterFiles:
+    """
+    Describes a ROS parameter file made from multiple source files.
+
+    A node process gets the same parameters as when the source files are passed to it
+    in order: entries are grouped by node name in order of first appearance, and values
+    from a later file replace those of an earlier one.
+    Composable nodes get it as one file, where launch applies the entries for the node
+    name after the wildcard entries.
+    """
+
+    def __init__(
+        self,
+        param_files: Sequence[Union[FilePath, SomeSubstitutionsType]],
+        *,
+        allow_substs: [bool, SomeSubstitutionsType] = False
+    ) -> None:
+        """
+        Construct a combined parameter file description.
+
+        :param param_files: Paths to parameter files, later files take precedence.
+        :param allow_subst: Allow substitutions in the parameter files.
+        """
+        # __del__ runs even if the constructor raises.
+        self.__written_files: Dict[str, Path] = {}
+
+        ensure_argument_type(param_files, (list, tuple), 'param_files', 'CombinedParameterFiles()')
+        for param_file in param_files:
+            ensure_argument_type(
+                param_file,
+                SomeSubstitutionsType_types_tuple + (os.PathLike, bytes),
+                'param_files',
+                'CombinedParameterFiles()'
+            )
+        # The frontends pass substitutions for values such as "$(var allow)".
+        ensure_argument_type(
+            allow_substs,
+            (bool,) + SomeSubstitutionsType_types_tuple,
+            'allow_subst',
+            'CombinedParameterFiles()'
+        )
+        self.__param_files: List[Union[List[Substitution], FilePath]] = [
+            normalize_to_list_of_substitutions(param_file)
+            if isinstance(param_file, SomeSubstitutionsType_types_tuple) else param_file
+            for param_file in param_files
+        ]
+        self.__allow_substs = normalize_typed_substitution(allow_substs, data_type=bool)
+
+    @property
+    def param_files(self) -> List[Union[FilePath, List[Substitution]]]:
+        """Getter for parameter files."""
+        return self.__param_files
+
+    @property
+    def allow_substs(self) -> Union[bool, List[Substitution]]:
+        """Getter for allow substitutions argument."""
+        return self.__allow_substs
+
+    def __str__(self) -> Text:
+        return (
+            'launch_ros.description.CombinedParameterFiles'
+            f'(param_files={self.param_files}, allow_substs={self.allow_substs})'
+        )
+
+    def evaluate(self, context: LaunchContext) -> Path:
+        """Evaluate and return the path of the combined parameter file."""
+        # Here to avoid a circular import.
+        from .utilities.dump_params import parameter_file_entries
+
+        allow_substs = perform_typed_substitution(context, self.__allow_substs, data_type=bool)
+        paths = [
+            Path(perform_substitutions(context, param_file))
+            if isinstance(param_file, list) else Path(param_file)
+            for param_file in self.__param_files
+        ]
+        if len(paths) == 1 and not allow_substs:
+            return paths[0]
+
+        # Values stay YAML nodes so that their scalar style and tags are kept as written.
+        combined: Dict[str, Dict[str, yaml.Node]] = {}
+        for path in paths:
+            with open(path, 'r') as f:
+                text = f.read()
+            if allow_substs:
+                text = perform_substitutions(context, parse_substitution(text))
+            for key, name, value in parameter_file_entries(text, str(path)):
+                combined.setdefault(key, {})[name] = value
+
+        def str_node(value):
+            return yaml.ScalarNode('tag:yaml.org,2002:str', value)
+
+        def map_node(pairs):
+            return yaml.MappingNode('tag:yaml.org,2002:map', list(pairs))
+
+        contents = yaml.serialize(map_node(
+            (str_node(key), map_node([(str_node('ros__parameters'), map_node(
+                (str_node(name), value) for name, value in params.items()))]))
+            for key, params in combined.items()
+        ), Dumper=yaml.SafeDumper)
+        # The same combination is written once, even for many nodes or launch scopes.
+        if contents not in self.__written_files:
+            with NamedTemporaryFile(
+                mode='w', prefix='combined_launch_params_', delete=False
+            ) as h:
+                h.write(contents)
+            self.__written_files[contents] = Path(h.name)
+        return self.__written_files[contents]
+
+    def cleanup(self):
+        """Delete created temporary files."""
+        for path in self.__written_files.values():
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+        self.__written_files.clear()
 
     def __del__(self):
         self.cleanup()
