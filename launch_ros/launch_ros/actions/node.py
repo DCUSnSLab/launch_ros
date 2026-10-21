@@ -25,11 +25,6 @@ from typing import Text  # noqa: F401
 from typing import Tuple  # noqa: F401
 from typing import Union
 
-try:
-    import importlib.metadata as importlib_metadata
-except ModuleNotFoundError:
-    import importlib_metadata
-
 from launch.action import Action
 from launch.actions import ExecuteProcess
 from launch.frontend import Entity
@@ -44,6 +39,7 @@ from launch.substitutions import LocalSubstitution
 from launch.utilities import ensure_argument_type
 from launch.utilities import normalize_to_list_of_substitutions
 from launch.utilities import perform_substitutions
+from launch.utilities import select_entry_points
 
 from launch_ros.parameters_type import SomeParameters
 from launch_ros.remap_rule_type import SomeRemapRules
@@ -592,24 +588,16 @@ def instantiate_extension(
     return extension_instance
 
 
-g_entry_points_impl = None
 g_node_action_entry_points = None
 
 
 def get_extensions(logger):
-    global g_entry_points_impl
     global g_node_action_entry_points
     group_name = 'launch_ros.node_action'
     if g_node_action_entry_points is None:
-        if g_entry_points_impl is None:
-            g_entry_points_impl = importlib_metadata.entry_points()
-        entry_points_impl = g_entry_points_impl
         # select() scans every installed entry point; doing it once per Node dominated the
         # evaluation of large launch trees.
-        if hasattr(entry_points_impl, 'select'):
-            g_node_action_entry_points = list(entry_points_impl.select(group=group_name))
-        else:
-            g_node_action_entry_points = list(entry_points_impl.get(group_name, []))
+        g_node_action_entry_points = list(select_entry_points(group_name))
     groups = g_node_action_entry_points
     entry_points = {}
     for entry_point in groups:
