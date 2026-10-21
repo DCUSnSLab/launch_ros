@@ -15,6 +15,7 @@
 """Tests for the ComposableNodeContainer Action."""
 
 import asyncio
+import os
 
 from launch import LaunchDescription
 from launch import LaunchService
@@ -197,3 +198,35 @@ def test_composable_node_container_if_condition():
     assert get_node_name_count(context, f'/{TEST_CONTAINER_NAMESPACE}/{TEST_CONTAINER_NAME}') == 1
     assert get_node_name_count(context, f'/{TEST_NODE_NAMESPACE}/{test_node_name_1}') == 1
     assert get_node_name_count(context, f'/{TEST_NODE_NAMESPACE}/{test_node_name_2}') == 0
+
+
+def test_composable_node_container_with_python_component():
+    """C++ and Python composable nodes load into one mixed container."""
+    python_path = os.pathsep.join(
+        [os.path.dirname(__file__)] + os.environ.get('PYTHONPATH', '').split(os.pathsep))
+    actions = [
+        ComposableNodeContainer(
+            package='rclpy_components',
+            executable='component_container_mixed',
+            name=TEST_CONTAINER_NAME,
+            namespace=TEST_CONTAINER_NAMESPACE,
+            additional_env={'PYTHONPATH': python_path},
+            composable_node_descriptions=[
+                ComposableNode(
+                    package='composition',
+                    plugin='composition::Talker',
+                    namespace=TEST_NODE_NAMESPACE,
+                ),
+                ComposableNode(
+                    package='test_launch_ros',
+                    plugin='python_component:Listener',
+                    name=TEST_NODE_NAME,
+                    namespace=TEST_NODE_NAMESPACE,
+                ),
+            ],
+        ),
+    ]
+
+    context = _assert_launch_no_errors(actions)
+    assert get_node_name_count(context, f'/{TEST_NODE_NAMESPACE}/talker') == 1
+    assert get_node_name_count(context, f'/{TEST_NODE_NAMESPACE}/{TEST_NODE_NAME}') == 1
